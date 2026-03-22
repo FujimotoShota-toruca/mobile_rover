@@ -1,23 +1,14 @@
-# Python
-backend/.venv/
-backend/__pycache__/
-backend/.pytest_cache/
-backend/.mypy_cache/
-backend/.ruff_cache/
-backend/**/*.pyc
-
-# Node
+# frontend
 frontend/node_modules/
 frontend/dist/
 
-# OS / editor
-.DS_Store
+# python
+pc_agent/.venv/
+pc_agent/__pycache__/
+**/__pycache__/
+*.pyc
+
+# editor
 .vscode/
 .idea/
-
-# local env
-.env
-.env.local
-frontend/.env.local
-frontend/.env.production.local
-backend/.env
+.DS_Store

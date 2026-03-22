@@ -1,148 +1,69 @@
-# mobile_rover
+# mobile_rover local-first WebRTC v0
 
-スマホと PC が同じ URL に入り、WebSocket でセンサ/コマンドをやり取りし、WebRTC でカメラ映像を渡すためのオンライン前提 MVP です。
+この版は、**クラウド常駐 backend を主経路から外し**、
 
-## この版で追加したもの
+- スマホ: 公開 HTTPS フロントを開く
+- PC: ブラウザで同じフロントを開く
+- 通信本流: WebRTC 直結
+- PC ローカル処理: `pc_agent/` のインタフェースで受ける
 
-- 参照 UI に寄せた 2 カラムダッシュボード
-- PC 側の受信映像パネルと回転ボタン
-- PC 側の方向ボタン、キーボード操作、コマンドログ
-- PC 側の充電管理パネル
-- センサ履歴の簡易ラインチャート
-- 接続中 mobile device の自動一覧表示
-- WebRTC signaling を既存 WebSocket に統合
-- Pico W 用 HTTP bridge API
-- 今後の vision / sensor_fusion 制御拡張用インタフェース枠
-- Netlify / Render 向けの配備設定ファイル
+という方針に切り替えるための最初の骨格です。
 
+## v0 でできること
 
-## 推奨リポジトリ構成
+- backend なしでスマホ↔PC を **manual signaling** で WebRTC 接続
+- スマホの `DeviceMotion / DeviceOrientation` を PC に送る
+- スマホのカメラ映像を PC に送る
+- PC から `ping` を送ってスマホが `ack` を返す
+- PC 側に telemetry / event log / remote video を表示する
+- 将来の PC ローカル処理用に `pc_agent/` のインタフェース骨格を用意
 
-- `backend/`: FastAPI + WebSocket + bridge API
-- `frontend/`: React + Vite + TypeScript
-- `firmware/`: 実機側ファームウェア
-- `reference/`: 参考UIや試作HTML
-- `netlify.toml` / `render.yaml`: 配備設定
+## v0 の割り切り
 
-## 構成
+- signaling server はまだない
+- session code / QR pairing もまだない
+- PC local agent への自動ブリッジはまだない
+- まずは **manual offer/answer で本流が成立するか** を確認する版
 
-- `frontend/`
-  - React + Vite + TypeScript
-  - `mobile_sender`: センサ送信、ローカルカメラ、WebRTC offer 生成
-  - `pc_viewer`: ダッシュボード、WebRTC answer、Pico W bridge 操作
-- `backend/`
-  - FastAPI
-  - WebSocket session hub
-  - セッション状態管理
-  - Pico W HTTP bridge API
-- ルート直下
-  - `netlify.toml`: frontend 配備設定
-  - `render.yaml`: backend 配備設定
-  - `.env.example`: 本番環境変数の例
+## ディレクトリ
 
-## ローカル実行
+- `frontend/`: 公開 HTTPS 向けの React/Vite フロント
+- `pc_agent/`: PC ローカル処理の Python 骨格
+- `docs/`: アーキテクチャ・手順
+- `examples/`: JSON サンプル
 
-### backend
+## フロント起動
 
-```powershell
-cd backend
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-pytest -q
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-### frontend
-
-```powershell
+```bash
 cd frontend
 npm install
-npm run dev -- --host 0.0.0.0
+npm run dev
 ```
 
-## ローカル動作確認
+本番配備時は Netlify / Vercel / GitHub Pages などを想定しています。
 
-### PC 側
+## manual pairing の流れ
 
-- Session ID: `lab-demo-001`
-- Device ID: `pc-001`
-- Role: `pc_viewer`
+1. PC で `PC Host` を開く
+2. `Create Offer` を押す
+3. 生成された offer JSON をスマホへ渡す
+4. スマホで `Mobile Sensor` を開く
+5. `Start Camera` が必要なら押す
+6. PC から受け取った offer JSON を貼り付ける
+7. `Accept Offer / Create Answer` を押す
+8. answer JSON を PC へ返す
+9. PC で answer JSON を貼り付けて `Apply Answer` を押す
+10. connected になったら、スマホで `Start Telemetry` を押す
 
-### スマホ側
+## PC local agent について
 
-- Session ID: `lab-demo-001`
-- Device ID: `mobile-001`
-- Role: `mobile_sender`
+`pc_agent/` は、今後 WebRTC 受信結果をローカル保存・画像処理・制御出力に流すための骨格です。
+この v0 ではまだ frontend から自動接続していません。
 
-## 本番配備の要点
+優先実装順は次です。
 
-### frontend 側
+1. browser-browser で telemetry / video / ping-ack が通ることを確認
+2. PC 側 browser 受信結果を local file に保存
+3. `pc_agent` に message bridge を追加
+4. 必要なら tiny signaling relay を追加
 
-Netlify か Vercel に `frontend/` を配備します。  
-このリポジトリには `netlify.toml` が入っているので、Netlify ではそのまま読み込めます。
-
-設定する環境変数:
-
-```text
-VITE_API_BASE=https://your-api.onrender.com
-VITE_WS_BASE=wss://your-api.onrender.com
-```
-
-`VITE_API_BASE` は REST 用、`VITE_WS_BASE` は WebSocket signaling / sensor / command 用です。
-
-### backend 側
-
-Render か Railway に `backend/` を Web Service として配備します。  
-このリポジトリには `render.yaml`、`backend/Procfile`、`backend/runtime.txt` を入れてあります。
-
-推奨環境変数:
-
-```text
-CORS_ALLOW_ORIGINS=https://your-site.netlify.app,https://your-custom-domain.example,http://localhost:5173
-CORS_ALLOW_ORIGIN_REGEX=^https://.*$
-```
-
-### Render での最小手順
-
-1. GitHub に push
-2. Render で New + Web Service
-3. リポジトリを接続
-4. `render.yaml` を使うか、手動で次を設定
-   - Root Directory: `backend`
-   - Build Command: `pip install -r requirements.txt`
-   - Start Command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-5. デプロイ後、`/health` が返ることを確認
-
-### Netlify での最小手順
-
-1. GitHub に push
-2. Netlify で Add new site + Import an existing project
-3. リポジトリを接続
-4. `netlify.toml` を読み込ませる
-5. Site configuration の Environment variables に `VITE_API_BASE` と `VITE_WS_BASE` を設定
-6. 再デプロイ
-
-## HTTPS / 権限まわり
-
-- iPhone のセンサ取得は secure context が必要です。
-- iPhone のカメラ取得も secure context が必要です。
-- そのため、実機検証は `https://...` 上で行う前提です。
-- HTTPS の frontend から backend に接続する場合、WebSocket は `wss://...` を使ってください。
-
-## Pico W bridge API
-
-ブラウザから直接 `http://PicoIP/...` にアクセスさせるのではなく、backend が proxy します。  
-これはオンライン配備時の mixed-content / CORS 回避を意識した構成です。
-
-- `POST /api/vehicle/ping`
-- `POST /api/vehicle/move`
-- `POST /api/vehicle/battery/status`
-- `POST /api/vehicle/battery/action/{start|stop|monitor}`
-- `POST /api/vehicle/battery/set`
-
-## 注意
-
-- `.venv` は配布物に含めない運用が前提です。Windows 側では再生成してください。
-- WebRTC は 1 mobile_sender ↔ 1 pc_viewer を主対象にした MVP 実装です。
-- 本番運用では CORS を Netlify ドメインや独自ドメインに絞る方が安全です。
