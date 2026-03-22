@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RC Car Bridge</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f5f7fb;
+      --card: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --line: #d1d5db;
+      --accent: #2563eb;
+      --good: #059669;
+      --warn: #d97706;
+      --bad: #dc2626;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f172a;
+        --card: #111827;
+        --text: #e5e7eb;
+        --muted: #9ca3af;
+        --line: #374151;
+        --accent: #60a5fa;
+        --good: #34d399;
+        --warn: #f59e0b;
+        --bad: #f87171;
+      }
+    }
+    body {
+      margin: 0;
+      padding: 16px;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    h1 { margin: 0 0 12px; font-size: 24px; }
+    h2 { margin: 0 0 10px; font-size: 18px; }
+    .small { color: var(--muted); font-size: 12px; }
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(340px, 520px) minmax(340px, 1fr);
+      gap: 16px;
+      align-items: start;
+    }
+    @media (max-width: 1100px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      margin-bottom: 16px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+    }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+    button, input, select {
+      font: inherit;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: transparent;
+      color: inherit;
+      box-sizing: border-box;
+    }
+    button { cursor: pointer; }
+    .primary { background: var(--accent); color: white; border-color: var(--accent); }
+    .danger { background: var(--bad); color: white; border-color: var(--bad); }
+    .good { background: var(--good); color: white; border-color: var(--good); }
+    .warn { background: var(--warn); color: white; border-color: var(--warn); }
+    video {
+      width: 100%;
+      max-width: 100%;
+      background: black;
+      border-radius: 12px;
+      aspect-ratio: 16 / 9;
+      object-fit: contain;
+    }
+    .statusbox, pre {
+      background: rgba(127,127,127,0.08);
+      border-radius: 10px;
+      padding: 10px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 13px;
+    }
+    .control-grid {
+      display: grid;
+      grid-template-columns: 84px 84px 84px;
+      gap: 10px;
+      justify-content: start;
+    }
+    .control-grid button { height: 54px; font-weight: 700; }
+    .hidden { display: none !important; }
+    .pill {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 3px 10px;
+      border: 1px solid var(--line);
+      font-size: 12px;
+      margin-right: 6px;
+    }
+    .telemetry-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 10px;
+    }
+    .telemetry-item {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+    }
+    .telemetry-label { font-size: 12px; color: var(--muted); }
+    .telemetry-value { font-size: 18px; font-weight: 700; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <h1>RC Car WebRTC + BLE Bridge</h1>
+  <div class="small">vehicle = 車載スマホ / controller = PC 操縦端末</div>
+
+  <div class="grid">
+    <div>
+      <div class="card">
+        <h2>セッション</h2>
+        <div class="row">
+          <label for="role">role</label>
+          <select id="role">
+            <option value="vehicle">vehicle（車載スマホ）</option>
+            <option value="controller">controller（PC）</option>
+          </select>
+          <label for="roomId">room</label>
+          <input id="roomId" type="text" value="carcam-01" />
+        </div>
+        <div class="row">
+          <button id="initBtn">初期化</button>
+          <button id="bleConnectBtn" class="good">BLE接続</button>
+          <button id="startBtn" class="primary">セッション開始</button>
+          <button id="stopBtn" class="danger">停止</button>
+        </div>
+        <div class="row">
+          <span class="pill" id="securePill">HTTPS: ?</span>
+          <span class="pill" id="blePill">BLE: idle</span>
+          <span class="pill" id="rtcPill">RTC: idle</span>
+          <span class="pill" id="autoPill">AUTO: off</span>
+        </div>
+        <div id="statusBox" class="statusbox">未初期化</div>
+      </div>
+
+      <div class="card" id="vehiclePanel">
+        <h2>vehicle side</h2>
+        <video id="localVideo" autoplay playsinline muted></video>
+        <div class="small">車載スマホでカメラ確認用</div>
+      </div>
+
+      <div class="card" id="controllerPanel">
+        <h2>controller side</h2>
+        <video id="remoteVideo" autoplay playsinline></video>
+        <div class="small">受信映像</div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card" id="controlPanel">
+        <h2>手動操縦</h2>
+        <div class="row">
+          <button id="manualModeBtn">MANUAL</button>
+          <button id="autoModeBtn" class="warn">AUTO</button>
+          <button id="estopBtn" class="danger">E-STOP</button>
+          <button id="pingBtn">PING</button>
+        </div>
+        <div class="control-grid">
+          <div></div>
+          <button id="forwardBtn" class="primary">前進</button>
+          <div></div>
+
+          <button id="leftBtn" class="primary">左</button>
+          <button id="stopDriveBtn" class="danger">停止</button>
+          <button id="rightBtn" class="primary">右</button>
+
+          <div></div>
+          <button id="backBtn" class="primary">後退</button>
+          <div></div>
+        </div>
+        <div class="small">キーボード: W/A/S/D, Space=停止</div>
+      </div>
+
+      <div class="card" id="autonomyPanel">
+        <h2>localhost 自律制御</h2>
+        <div class="row">
+          <input id="autonomyUrl" type="text" value="ws://127.0.0.1:8765/ws" style="min-width:280px;" />
+          <button id="autonomyConnectBtn">自律WS接続</button>
+          <button id="autonomyDisconnectBtn">切断</button>
+        </div>
+        <div id="autonomyStatus" class="statusbox">未接続</div>
+      </div>
+
+      <div class="card">
+        <h2>テレメトリ</h2>
+        <div class="telemetry-grid">
+          <div class="telemetry-item"><div class="telemetry-label">Pico state</div><div class="telemetry-value" id="picoState">-</div></div>
+          <div class="telemetry-item"><div class="telemetry-label">Battery [mV]</div><div class="telemetry-value" id="batteryMv">-</div></div>
+          <div class="telemetry-item"><div class="telemetry-label">GPS</div><div class="telemetry-value" id="gpsValue">-</div></div>
+          <div class="telemetry-item"><div class="telemetry-label">Heading</div><div class="telemetry-value" id="headingValue">-</div></div>
+        </div>
+        <pre id="telemetryPre">{}</pre>
+      </div>
+
+      <div class="card">
+        <h2>ログ</h2>
+        <pre id="logBox">ready</pre>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>

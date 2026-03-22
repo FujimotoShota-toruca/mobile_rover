@@ -1,9 +1,0 @@
-{
-  "type": "command",
-  "commandId": "cmd-0001",
-  "command": "ping",
-  "params": {
-    "message": "hello from pc"
-  },
-  "timestamp": 1774000001234
-}
