@@ -11,7 +11,9 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.18), transparent 24%),
+    linear-gradient(180deg, #0f172a 0%, #111827 100%);
 }
 
 button {
@@ -31,10 +33,14 @@ textarea {
   width: 100%;
 }
 
+h1, h2, h3, p {
+  margin: 0;
+}
+
 .app-shell {
-  max-width: 1280px;
+  max-width: 1320px;
   margin: 0 auto;
-  padding: 1.5rem;
+  padding: 1.25rem;
 }
 
 .header {
@@ -42,11 +48,23 @@ textarea {
   flex-wrap: wrap;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.hero-card {
+  backdrop-filter: blur(10px);
+}
+
+.align-end {
+  align-items: flex-end;
 }
 
 .muted {
   color: #94a3b8;
+}
+
+.small {
+  font-size: 0.92rem;
 }
 
 .segmented {
@@ -77,7 +95,7 @@ textarea {
 }
 
 .card {
-  background: rgba(15, 23, 42, 0.7);
+  background: rgba(15, 23, 42, 0.76);
   border: 1px solid #334155;
   border-radius: 18px;
   padding: 1rem;
@@ -93,6 +111,10 @@ textarea {
 .button-row {
   display: flex;
   gap: 0.75rem;
+}
+
+.button-row.compact button {
+  padding: 0.55rem 0.8rem;
 }
 
 .wrap {
@@ -134,19 +156,29 @@ textarea {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+.video-stage {
+  display: grid;
+  place-items: center;
+  min-height: 320px;
+  background: #020617;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
 .video-box {
   width: 100%;
   min-height: 260px;
   border-radius: 12px;
   border: 1px solid #334155;
   background: #000;
+  object-fit: contain;
 }
 
 .log-box {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  max-height: 560px;
+  max-height: 620px;
   overflow: auto;
 }
 
@@ -162,5 +194,13 @@ textarea {
 @media (max-width: 960px) {
   .cols-2 {
     grid-template-columns: 1fr;
+  }
+
+  .header {
+    flex-direction: column;
+  }
+
+  .align-end {
+    align-items: flex-start;
   }
 }

@@ -1,29 +1,23 @@
-# Manual Pairing Procedure
+# manual pairing v1
 
-## PC side
+## 成功しやすい順番
 
-1. Open frontend and choose `PC Host`
-2. Click `Create Offer`
-3. Copy the offer JSON
-4. Wait for mobile answer JSON
-5. Paste answer JSON
-6. Click `Apply Answer`
-7. Confirm `pc.connection = connected`
+1. PC Host で `Create Offer`
+   - v1 では video recvonly transceiver が自動で追加される
+2. Offer JSON を Mobile Sensor に貼る
+3. Mobile Sensor で `Start Camera`
+4. `Accept Offer / Create Answer`
+5. Answer JSON を PC Host に戻す
+6. PC Host で `Apply Answer`
+7. `dc: open` と `video: track / playing` を見る
+8. Mobile Sensor で `Start Telemetry`
+9. PC Host で telemetry count が増えることを確認
+10. PC Host で `Send Ping`
+11. latest ack を確認
 
-## Mobile side
+## 失敗しやすいパターン
 
-1. Open frontend and choose `Mobile Sensor`
-2. Optional: click `Start Camera`
-3. Paste the PC offer JSON
-4. Click `Accept Offer / Create Answer`
-5. Copy answer JSON back to PC
-6. Wait for `mobile.connection = connected`
-7. Click `Start Telemetry`
-
-## Expected messages
-
-- telemetry frame
-- ping command
-- ack response
-- optional camera track
-
+- camera を起動する前に Answer を作る
+- DataChannel が open する前に Send Ping を押す
+- HTTPS でなく iPhone 権限が denied になる
+- Safari を背面に回して telemetry の安定性が落ちる
