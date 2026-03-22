@@ -1,31 +1,64 @@
+import {
+  doc,
+  getDoc,
+  onSnapshot,
+  type Unsubscribe,
+} from "firebase/firestore";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { JsonBox } from "../components/JsonBox";
-import { applyRemoteDescriptionBlob, createOfferBlob } from "../lib/webrtc";
+import { db, isFirebaseConfigured } from "../lib/firebase";
+import {
+  appendIceCandidate,
+  cleanupRoomArtifacts,
+  createOrResetRoom,
+  getCandidateCollection,
+  getRoomRef,
+  markRoomState,
+  sha256Hex,
+  type RoomRecord,
+} from "../lib/room";
 import type { AckMessage, RoverMessage, TelemetryFrame } from "../types/messages";
 
 function logLine(input: unknown): string {
   return typeof input === "string" ? input : JSON.stringify(input, null, 2);
 }
 
+async function waitForIceGatheringComplete(pc: RTCPeerConnection): Promise<void> {
+  if (pc.iceGatheringState === "complete") return;
+  await new Promise<void>((resolve) => {
+    const handler = () => {
+      if (pc.iceGatheringState === "complete") {
+        pc.removeEventListener("icegatheringstatechange", handler);
+        resolve();
+      }
+    };
+    pc.addEventListener("icegatheringstatechange", handler);
+  });
+}
+
 export function PcPage() {
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
+  const roomUnsubRef = useRef<Unsubscribe | null>(null);
+  const candidateUnsubRef = useRef<Unsubscribe | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const hasVideoTransceiverRef = useRef(false);
+  const remoteCandidateIdsRef = useRef<Set<string>>(new Set());
 
+  const [roomName, setRoomName] = useState("carcam-01");
+  const [password, setPassword] = useState("");
   const [connectionState, setConnectionState] = useState("new");
   const [iceState, setIceState] = useState("new");
   const [iceGatheringState, setIceGatheringState] = useState("new");
   const [channelState, setChannelState] = useState("closed");
-  const [offerBlob, setOfferBlob] = useState("");
-  const [answerBlob, setAnswerBlob] = useState("");
-  const [logs, setLogs] = useState<string[]>([]);
-  const [latestTelemetry, setLatestTelemetry] = useState<TelemetryFrame | null>(null);
-  const [latestAck, setLatestAck] = useState<AckMessage | null>(null);
+  const [roomState, setRoomState] = useState("idle");
+  const [remoteVideoState, setRemoteVideoState] = useState<"idle" | "track" | "playing" | "error">("idle");
   const [telemetryCount, setTelemetryCount] = useState(0);
   const [lastTelemetryTs, setLastTelemetryTs] = useState<number | null>(null);
   const [videoRotationDeg, setVideoRotationDeg] = useState(0);
-  const [remoteVideoState, setRemoteVideoState] = useState<"idle" | "track" | "playing" | "error">("idle");
+  const [latestTelemetry, setLatestTelemetry] = useState<TelemetryFrame | null>(null);
+  const [latestAck, setLatestAck] = useState<AckMessage | null>(null);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [roomDocPreview, setRoomDocPreview] = useState<string>("No room yet");
 
   const telemetryText = useMemo(() => {
     if (!latestTelemetry) return "No telemetry yet";
@@ -33,11 +66,33 @@ export function PcPage() {
   }, [latestTelemetry]);
 
   const appendLog = (value: unknown) => {
-    setLogs((prev) => [logLine(value), ...prev].slice(0, 80));
+    setLogs((prev) => [logLine(value), ...prev].slice(0, 120));
+  };
+
+  const teardownSubscriptions = () => {
+    roomUnsubRef.current?.();
+    candidateUnsubRef.current?.();
+    roomUnsubRef.current = null;
+    candidateUnsubRef.current = null;
+    remoteCandidateIdsRef.current.clear();
+  };
+
+  const teardownPeer = () => {
+    dataChannelRef.current?.close();
+    pcRef.current?.close();
+    dataChannelRef.current = null;
+    pcRef.current = null;
+    hasVideoTransceiverRef.current = false;
+    setChannelState("closed");
+    setConnectionState("closed");
+    setIceState("closed");
+    setIceGatheringState("closed");
+    setRemoteVideoState("idle");
   };
 
   const ensurePeer = () => {
     if (pcRef.current) return pcRef.current;
+
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
@@ -46,7 +101,13 @@ export function PcPage() {
     channel.onopen = () => {
       setChannelState(channel.readyState);
       appendLog({ info: "datachannel open" });
+      void syncRoomState({ hostState: "connected" });
     };
+    channel.onclose = () => {
+      setChannelState(channel.readyState);
+      appendLog({ info: "datachannel closed" });
+    };
+    channel.onerror = () => appendLog({ error: "datachannel error" });
     channel.onmessage = (event) => {
       const parsed = JSON.parse(event.data) as RoverMessage;
       appendLog(parsed);
@@ -55,13 +116,10 @@ export function PcPage() {
         setTelemetryCount((prev) => prev + 1);
         setLastTelemetryTs(parsed.timestamp);
       }
-      if (parsed.type === "ack") setLatestAck(parsed);
+      if (parsed.type === "ack") {
+        setLatestAck(parsed);
+      }
     };
-    channel.onclose = () => {
-      setChannelState(channel.readyState);
-      appendLog({ info: "datachannel closed" });
-    };
-    channel.onerror = () => appendLog({ error: "datachannel error" });
 
     pc.onconnectionstatechange = () => {
       setConnectionState(pc.connectionState);
@@ -101,22 +159,103 @@ export function PcPage() {
     return pc;
   };
 
-  const prepareOffer = async () => {
+  const syncRoomState = async (patch: Partial<RoomRecord>) => {
+    if (!db) return;
+    try {
+      await markRoomState(db, roomName, patch);
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const beginListening = async () => {
+    if (!db) {
+      appendLog({ error: "Firebase is not configured" });
+      return;
+    }
+    if (!password.trim()) {
+      appendLog({ error: "password is required" });
+      return;
+    }
+
+    teardownSubscriptions();
+    teardownPeer();
+    setTelemetryCount(0);
+    setLastTelemetryTs(null);
+    setLatestTelemetry(null);
+    setLatestAck(null);
+
     const pc = ensurePeer();
     if (!hasVideoTransceiverRef.current) {
       pc.addTransceiver("video", { direction: "recvonly" });
       hasVideoTransceiverRef.current = true;
       appendLog({ info: "video recvonly transceiver added" });
     }
-    const blob = await createOfferBlob(pc);
-    setOfferBlob(blob);
-    appendLog({ info: "offer created" });
+
+    pc.onicecandidate = async (event) => {
+      if (!event.candidate || !db) return;
+      try {
+        await appendIceCandidate(db, roomName, "callerCandidates", event.candidate);
+      } catch (error) {
+        console.error(error);
+        appendLog({ error: "failed to publish caller candidate" });
+      }
+    };
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    await waitForIceGatheringComplete(pc);
+
+    const passwordHash = await sha256Hex(password);
+    await createOrResetRoom(db, roomName, passwordHash, pc.localDescription ?? offer);
+    setRoomState("waiting-answer");
+    appendLog({ info: "room created/reset" });
+
+    const roomRef = getRoomRef(db, roomName);
+    roomUnsubRef.current = onSnapshot(roomRef, async (snapshot) => {
+      if (!snapshot.exists()) {
+        setRoomDocPreview("Room deleted");
+        return;
+      }
+      const data = snapshot.data() as RoomRecord;
+      setRoomDocPreview(JSON.stringify(data, null, 2));
+      if (data.answer && !pc.currentRemoteDescription) {
+        await pc.setRemoteDescription(data.answer);
+        appendLog({ info: "answer applied from Firestore" });
+        setRoomState("connected-awaiting-media");
+      }
+    });
+
+    const remoteCandidatesRef = getCandidateCollection(db, roomName, "calleeCandidates");
+    candidateUnsubRef.current = onSnapshot(remoteCandidatesRef, (snapshot) => {
+      snapshot.docChanges().forEach(async (change) => {
+        if (change.type !== "added") return;
+        if (remoteCandidateIdsRef.current.has(change.doc.id)) return;
+        remoteCandidateIdsRef.current.add(change.doc.id);
+        try {
+          await pc.addIceCandidate(change.doc.data());
+        } catch (error) {
+          console.error(error);
+          appendLog({ error: "failed to add callee candidate" });
+        }
+      });
+    });
+  };
+
+  const resetRoom = async () => {
+    if (!db) return;
+    teardownSubscriptions();
+    teardownPeer();
+    await cleanupRoomArtifacts(db, roomName);
+    setRoomState("idle");
+    setRoomDocPreview("Room deleted");
+    appendLog({ info: "room reset" });
   };
 
   useEffect(() => {
     return () => {
-      dataChannelRef.current?.close();
-      pcRef.current?.close();
+      teardownSubscriptions();
+      teardownPeer();
     };
   }, []);
 
@@ -126,10 +265,12 @@ export function PcPage() {
         <div>
           <h2>PC Host</h2>
           <p className="muted">
-            受信側。Offer作成前に video recvonly transceiver を自動追加し、スマホの映像を受ける。
+            Firestore の room signaling を使って受信側の接続を待つ。カメラは remote video として受け、telemetry / ack は DataChannel で受ける。
           </p>
         </div>
         <div className="badge-row">
+          <span className="badge">firebase: {isFirebaseConfigured() ? "configured" : "missing"}</span>
+          <span className="badge">room: {roomState}</span>
           <span className="badge">pc.connection: {connectionState}</span>
           <span className="badge">pc.ice: {iceState}</span>
           <span className="badge">pc.gather: {iceGatheringState}</span>
@@ -141,20 +282,23 @@ export function PcPage() {
       <div className="grid cols-2 gap-lg">
         <section className="stack-gap">
           <div className="card stack-gap">
-            <h3>Pairing</h3>
+            <h3>Room pairing</h3>
+            <label className="field">
+              <span>Room name</span>
+              <input value={roomName} onChange={(e) => setRoomName(e.target.value)} placeholder="carcam-01" />
+            </label>
+            <label className="field">
+              <span>Password</span>
+              <input
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                type="password"
+                placeholder="shared secret"
+              />
+            </label>
             <div className="button-row wrap">
-              <button type="button" onClick={prepareOffer}>
-                Create Offer
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  const pc = ensurePeer();
-                  await applyRemoteDescriptionBlob(pc, answerBlob);
-                  appendLog({ info: "answer applied" });
-                }}
-              >
-                Apply Answer
+              <button type="button" onClick={() => void beginListening()}>
+                Create / Reset Room
               </button>
               <button
                 type="button"
@@ -177,14 +321,14 @@ export function PcPage() {
               >
                 Send Ping
               </button>
+              <button type="button" onClick={() => void resetRoom()}>
+                Close Room
+              </button>
             </div>
             <p className="muted small">
-              Mobile 側は Start Camera を先に押してから Accept Offer / Create Answer を実行してください。
+              送信側スマホでは同じ room name / password を入力し、Start Camera のあと Join Room を押してください。
             </p>
           </div>
-
-          <JsonBox label="Local Offer JSON" value={offerBlob} readOnly />
-          <JsonBox label="Remote Answer JSON" value={answerBlob} onChange={setAnswerBlob} />
 
           <div className="card stack-gap">
             <div className="row-between">
@@ -202,6 +346,11 @@ export function PcPage() {
             <pre className="pre-box">
               {latestAck ? JSON.stringify(latestAck, null, 2) : "No ack yet"}
             </pre>
+          </div>
+
+          <div className="card stack-gap">
+            <h3>Room document</h3>
+            <pre className="pre-box">{roomDocPreview}</pre>
           </div>
         </section>
 

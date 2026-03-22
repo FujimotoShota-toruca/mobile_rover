@@ -1,41 +1,25 @@
-# mobile_rover local-first WebRTC v1
+# mobile_rover local-first WebRTC v2
 
-公開HTTPSフロントをスマホ/PCで開き、manual signaling で WebRTC を直結するローカルファースト試作版です。
+公開 HTTPS フロントをスマホと PC が開き、Firestore を signaling にだけ使って WebRTC を張る試作版です。
 
-## 今回の v1 で狙うこと
+- video: WebRTC media track
+- telemetry / command / ack: RTCDataChannel
+- pairing: room name + password
+- camera / sensor permission: スマホ側 HTTPS 前提
 
-- iPhone Safari で DeviceMotion / DeviceOrientation の権限を取る
-- WebRTC DataChannel で telemetry / ping / ack を流す
-- WebRTC video track でスマホ映像を PC に表示する
-- 常駐 backend を本流から外し、PC を処理主体にする
+## ディレクトリ
 
-## UI の考え方
+- `frontend/` Firestore signaling + WebRTC UI
+- `pc_agent/` PC ローカル処理骨格
+- `docs/` 設計メモ
+- `examples/` メッセージ例
 
-- `PC Host`
-  - Offer 作成
-  - Answer 適用
-  - telemetry 受信表示
-  - latest ack 表示
-  - remote video 表示
-  - video rotation
-- `Mobile Sensor`
-  - Camera 起動
-  - Offer 適用 / Answer 作成
-  - telemetry 送信
-  - command 受信 / ack 返送
-  - local camera preview
+## frontend セットアップ
 
-## 重要な注意
-
-remote video を受けるには、PC 側 Offer に video m-line が必要です。
-v1 では `PC Host` の `Create Offer` 実行時に `video recvonly transceiver` を自動追加しています。
-
-また、Mobile 側は **Start Camera を先に押してから** `Accept Offer / Create Answer` を実行してください。
-これにより、video track が Answer に乗ります。
-
-## 使い方
-
-### ローカル開発
+1. Firebase で Web App と Firestore Database を作成
+2. repo 直下の `.env.example` をコピーして `.env.local` を作成
+3. Firebase Web App の設定値を `VITE_FIREBASE_*` に貼る
+4. `frontend/` でインストールと起動
 
 ```bash
 cd frontend
@@ -43,32 +27,38 @@ npm install
 npm run dev
 ```
 
-### HTTPS 配信
+## デプロイ
 
-iPhone Safari で telemetry permission を通すには、HTTPS 配信が前提です。
-Netlify などに `frontend/` を静的デプロイして利用してください。
+Netlify / Vercel などの静的ホスティングを想定しています。
 
-## manual pairing 手順
+- Base directory: `frontend`
+- Build command: `npm run build`
+- Publish directory: `dist`
 
-1. PC で `PC Host` を開く
-2. `Create Offer`
-3. 表示された Offer JSON をスマホへコピー
-4. スマホで `Mobile Sensor` を開く
-5. `Start Camera`
-6. Offer JSON を貼る
-7. `Accept Offer / Create Answer`
-8. 生成された Answer JSON を PC へ戻す
-9. PC で `Apply Answer`
-10. `dc: open` と `pc.connection: connected` を確認
-11. スマホで `Start Telemetry`
-12. PC で telemetry 更新を確認
-13. PC で `Send Ping`
-14. latest ack を確認
+`.env.local` の代わりに、ホスティング側の環境変数へ `VITE_FIREBASE_*` を設定してください。
 
-## 今後の拡張
+## 使い方
 
-- tiny signaling relay
-- QR pairing
-- pc_agent 自動ブリッジ
-- OpenCV / vision hook
-- vehicle bridge
+### PC Host
+
+1. `PC Host` を開く
+2. `Room name` と `Password` を決める
+3. `Create / Reset Room` を押す
+4. 待機する
+
+### Mobile Sensor
+
+1. `Mobile Sensor` を開く
+2. 同じ `Room name` と `Password` を入れる
+3. `Start Camera` を押す
+4. `Join Room` を押す
+5. `Start Telemetry` を押す
+
+## Firestore ルール
+
+試作段階では `rooms` コレクションだけ読み書きできる緩いルールで十分です。`docs/firebase_setup.md` にサンプルを置いています。
+
+## 注意
+
+- password はクライアント側で SHA-256 にして room document に保存しています。デモ用途の軽いゲートであり、本格的な認証ではありません。
+- iPhone / Safari はページ前面表示中の方が telemetry が安定します。

@@ -12,3 +12,6 @@ pc_agent/__pycache__/
 .vscode/
 .idea/
 .DS_Store
+
+# local env
+frontend/.env.local

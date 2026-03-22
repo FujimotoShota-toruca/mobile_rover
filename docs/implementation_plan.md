@@ -1,24 +1,18 @@
 # Implementation plan
 
-## Sprint 0
+## v2 で入れたもの
 
-- manual signaling
-- browser-browser WebRTC
-- telemetry / ping-ack / remote video
+- Firestore room signaling
+- room name + password pairing
+- host recvonly video transceiver
+- mobile camera-first answer flow
+- telemetry / command / ack over RTCDataChannel
+- local / remote video, rotation, room document preview, event log
 
-## Sprint 1
+## 次にやること
 
-- telemetry buffering and CSV export on PC
-- simple FFT / filter / state estimate hooks
-
-## Sprint 2
-
-- local bridge from PC browser to pc_agent
-- vision processor hook
-- control engine hook
-
-## Sprint 3
-
-- tiny signaling relay
-- session code / QR pairing
-
+1. room の期限切れ掃除
+2. QR で room 情報共有
+3. `pc_agent` と browser host の bridge
+4. camera on/off の再交渉
+5. Firestore rules の強化

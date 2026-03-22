@@ -2,11 +2,11 @@ export type TelemetryFrame = {
   type: "telemetry";
   deviceId: string;
   timestamp: number;
-  motion?: {
-    accel?: { x: number; y: number; z: number };
-    rotationRate?: { alpha: number; beta: number; gamma: number };
+  motion: {
+    accel: { x: number; y: number; z: number };
+    rotationRate: { alpha: number; beta: number; gamma: number };
   };
-  orientation?: {
+  orientation: {
     alpha: number | null;
     beta: number | null;
     gamma: number | null;
@@ -25,7 +25,7 @@ export type AckMessage = {
   type: "ack";
   commandId: string;
   status: "ok" | "error";
-  message?: string;
+  message: string;
   timestamp: number;
 };
 
